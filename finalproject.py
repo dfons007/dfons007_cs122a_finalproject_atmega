@@ -43,7 +43,7 @@ while 1:
     GPIO.output(17, False)
     TFT.clear()
     print('Loading image...')
-    image = Image.open('bitch.jpg')
+    image = Image.open('trinh.jpg')
     # Resize the image and rotate it so it's 240x320 pixels.
     image = image.rotate(90,0,1).resize((240, 320))
     # Draw the image on the display hardware.
