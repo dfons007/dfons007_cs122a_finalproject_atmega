@@ -74,10 +74,10 @@ GPIO.output(17, False)
 spiatmega = createSPI(1)
 
 while 1:
-  state = GPIO.input(4)
+  state = spiatmega.readbytes(1)
   GPIO.output(17, False)
-  if(state):
-    spiatmega.writebytes([0x01])
+  print(state)
+  if(state[0] == 10):
     #get imag
     video = v4l2capture.Video_device('/dev/video0')
     video.set_format(320,240)
@@ -99,8 +99,9 @@ while 1:
     # Draw the image on the display hardware.
     print('Drawing image')
     TFT.display(image)
-    GPIO.output(17,True)
+    print("done")
+    sleep(1)
+    spiatmega.writebytes([0xFF])
   else:
-    TFT.clear()
     print('Signal is no longer high')
   sleep(1)

@@ -13,6 +13,7 @@
 #include "spi.h"
 #include "mfrc522.h"
 #include <bit.h>
+#include "usart_ATmega1284.h"
 
 #define PORT PORTB
 #define DDR_SPI DDRB
@@ -57,7 +58,7 @@ int readRFC(int state){
 				state = r_check;
 			break;
 		case r_wait:
-			temp = (~PINC & 0x01);
+			temp = (PINC & 0x01);
 			if(temp){
 				state = r_check;
 			}else{
@@ -77,6 +78,10 @@ int readRFC(int state){
 			PORTB &= ~(1<< 0); // Goes low
 			break;
 		case r_wait:
+			if(USART_HasReceived(0)){
+				temp = USART_Receive(0);
+				PORT = temp;
+			}
 			PORTA = 0xFF;
 			PORTB |= (1 << 0); // Goes high
 			break;
@@ -120,8 +125,8 @@ int main(void)
 	mfrc522_write(DivIEnReg,byte|0x80);
 	_delay_ms(1500);
 	
-	// Start doing shit here
-	//SPI_SlaveInit();
+	// Init USART
+	initUSART(0);
 	
 	task myTasks[1];
 	tasksNum = 1;
