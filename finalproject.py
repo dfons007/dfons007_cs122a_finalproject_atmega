@@ -1,6 +1,7 @@
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
+from PIL import ImageFilter
 
 from lib_tft24T import TFT24T
 import RPi.GPIO as GPIO
@@ -9,6 +10,26 @@ import select
 import v4l2capture
 import spidev
 from time import sleep
+
+def capture(mode):
+    video = v4l2capture.Video_device('/dev/video0')
+    size_x, size_y = video.set_format(320,240)
+    video.create_buffers(1)
+    video.queue_all_buffers()
+    video.start()
+    select.select((video,),(),())
+    image_data = video.read()
+    video.close()
+    image = Image.frombytes("RGB",(size_x,size_y), image_data)
+    image.save("games.jpg")
+    if(mode == "1"):
+        image = Image.open("games.jpg")
+        image = image.convert('1')
+        image.save("games.jpg")
+    elif (mode== "L"):
+        image = Image.open("games.jpg")
+        image = image.convert('L')
+        image.save("games.jpg")
 
 def createSPI(device):
     #Obj
@@ -20,33 +41,16 @@ def createSPI(device):
     spi.mode=0
     return spi
 
-#open capture
-video = v4l2capture.Video_device('/dev/video0')
-size_x, size_y = video.set_format(320,240)
-video.create_buffers(1)
-
-#send buffer
-video.queue_all_buffers()
-#start device
-video.start()
-#wait
-select.select((video,),(),())
-#rest
-image_data = video.read()
-video.close()
-image = Image.frombytes("RGB",(size_x,size_y),image_data)
-image.save("games.jpg")
-
-
-
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 GPIO.setup(4, GPIO.IN)
 GPIO.setup(17, GPIO.OUT)
 
+image = Image.open("games.jpg")
+image = image.convert('L')
+image.save("games.jpg")
 
-   
 # Raspberry Pi configuration.
 #For LCD TFT SCREEN:
 DC = 24
@@ -77,18 +81,14 @@ while 1:
   state = spiatmega.readbytes(1)
   GPIO.output(17, False)
   print(state)
-  if(state[0] == 10):
+  if(state[0] == 10 or state[0]==11 or state[0]==12):
     #get imag
-    video = v4l2capture.Video_device('/dev/video0')
-    video.set_format(320,240)
-    video.create_buffers(1)
-    video.queue_all_buffers()
-    video.start()
-    select.select((video,),(),())
-    image_data = video.read()
-    video.close()
-    image = Image.frombytes("RGB", (size_x,size_y),image_data)
-    image.save("games.jpg")
+    if(state[0]==10):
+        capture("RGB")
+    elif state[0]==11:
+        capture("L")
+    elif state[0]==12:
+        capture("1")
     # Do image processing
     print(spiatmega.readbytes(1))
     TFT.clear()
