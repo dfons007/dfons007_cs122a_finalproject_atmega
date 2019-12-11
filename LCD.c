@@ -8,12 +8,14 @@
  */
 
 
+#include <avr/io.h>
 #include <util/delay.h>
 #include "scheduler.h"
-#include "spi.h"
-#include "mfrc522.h"
-#include <bit.h>
 #include "usart_ATmega1284.h"
+#include "lcd.h"
+#include <bit.h>
+#include <avr/interrupt.h>
+unsigned char input = 0x00;
 
 #define PORT PORTB
 #define DDR_SPI DDRB
@@ -22,13 +24,10 @@
 #define DD_MISO PB6
 #define DD_SCK PB7
 #define DD_SS PB4
-#define SPI_SS1 PB0
-
-uint8_t byte = 0x00;
-uint8_t str[MAX_LEN];
-unsigned char input = 0x00;
-char reader = 0x00;
-
+char cinput = 0x00;
+#define button1 (~PINC & 0x08)
+#define button2 (~PINC & 0x10)
+#define button3 (~PINC & 0x20)
 
 void SPI_SlaveInit(void){
 	DDRB = 0x40;
@@ -40,107 +39,132 @@ void SPI_SlaveInit(void){
 
 ISR(SPI_STC_vect){
 	input = SPDR;
+	if(input == 0xFF){
+		cinput = input;
+	}
+}
+
+
+void SPI_slaveReceive(char cData){
+	PORTB &= ~(1<<DD_SS); //SS is low
+	SPDR = cData;
+	while(!(SPSR & (1<<SPIF)));
+	PORTB |= (1 << DD_SS); // SS is set High
 }
 
 char temp = 0x00;
-enum readRFC_states{r_init, r_check, r_wait} readRFC_state;
-int readRFC(int state){
+enum check_state{c_init, c_transmit, c_transmitbw, c_transmitbin, c_wait, c_display, c_pick, c_piwait, c_pisend} check_state;
+int check_sm(int state){
 	switch(state){
-		case r_init:
-			state = r_check;
+		case c_init:
+			state = c_wait;
 			break;
-		case r_check:
-			state = r_check;
-			byte = mfrc522_request(PICC_REQALL,str);
-			if(byte == CARD_FOUND)
-				state = r_wait;
-			else
-				state = r_check;
-			break;
-		case r_wait:
-			temp = (PINC & 0x01);
-			if(temp){
-				state = r_check;
-			}else{
-				state = r_wait;
-			}
-			break;
-		default:
-			state = r_init;
-			break;
-	}
-	
-	switch(state){
-		case r_init:
-			break;
-		case r_check:
-			PORTA = reader;
-			PORTB &= ~(1<< 0); // Goes low
-			break;
-		case r_wait:
+		case c_wait:
 			if(USART_HasReceived(0)){
 				temp = USART_Receive(0);
-				PORT = temp;
+				USART_Flush(0);
+				if(temp == 0x01){
+					state = c_display;
+					temp = 0x00;
+				}else{
+					state = c_wait;
+				}
 			}
-			PORTA = 0xFF;
-			PORTB |= (1 << 0); // Goes high
+			break;
+		case c_display:
+			state = c_pick;
+			break;
+		case c_pick:
+			if(button1){
+				state = c_transmit;
+			}else if(button2){
+				state = c_transmitbin;
+			}else if(button3){
+				state = c_transmitbw;
+			}else{
+				state = c_pick;
+			}
+			break;
+		case c_transmitbin:
+			state = c_piwait;
+			break;
+		case c_transmitbw:
+			state = c_piwait;
+			break;
+		case c_transmit:
+			state = c_piwait;
+			break;
+		case c_piwait:
+			if(cinput == 0xFF){
+				cinput = 0x00;
+				state = c_pisend;
+			}
+			break;
+		case c_pisend:
+			state = c_wait;
+			break;
+		default:
+			state = c_init;
+			break;
+	}
+	switch(state){
+		case c_init:
+			break;
+		case c_wait:
+			break;
+		case c_display:
+			LCD_DisplayString(0," 1. Reg   2. B&W    3. Binary");
+			break;
+		case c_pick:
+			break;
+		case c_transmit:
+			LCD_DisplayString(0," ctrans");
+			SPI_slaveReceive(10);
+			break;
+		case c_transmitbin:
+			LCD_DisplayString(0," ctransbw");
+			SPI_slaveReceive(11);
+			break;
+		case c_transmitbw:
+			LCD_DisplayString(0," ctransbin");
+			SPI_slaveReceive(12);
+			break;
+		case c_piwait:
+			break;
+		case c_pisend:
+			if(USART_IsSendReady(0)){
+				USART_Send(0x01,0);
+			}
 			break;
 		default:
 			break;
-	}
-	readRFC_state = state;
+	}	
 	return state;
-}
-
-
+};
 int main(void)
 {
     /* Replace with your application code */
-	// Output
+
 	DDRA = 0xFF;
 	PORTA = 0x00;
-	// Input
-	DDRC = 0x00;
-	PORTC = 0xFF;
+	DDRC = 0xC0;
+	PORTC = 0x3F;
 	// Variables
-	spi_init(1);
-	//Initialize card reader
-	mfrc522_init();
-	byte = mfrc522_read(VersionReg);
-	
-	if(byte == 0x92){
-		PORTA = 0x01;
-		reader = 0x01;
-	}else if(byte == 0x91||byte==0x90){
-		PORTA = 0x02;
-		reader = 0x02;
-	}else{
-		PORTA = 0x04;
-		reader = 0x04;
-	}
-	
-	byte = mfrc522_read(ComIEnReg);
-	mfrc522_write(ComIEnReg, byte|0x20);
-	byte = mfrc522_read(DivIEnReg);
-	mfrc522_write(DivIEnReg,byte|0x80);
-	_delay_ms(1500);
-	
-	// Init USART
-	initUSART(0);
-	
+	LCD_init();
+	LCD_WriteData('0'+2);
 	task myTasks[1];
 	tasksNum = 1;
-	
+	SPI_SlaveInit();
+	initUSART(0);
+	// set tasks
 	myTasks[0].state = -1;
-	myTasks[0].period = 100;
+	myTasks[0].period = 1000;
 	myTasks[0].elapsedTime = 100;
-	myTasks[0].TickFct = &readRFC;
+	myTasks[0].TickFct = &check_sm;
 	myTasks[0].active = 0x01;
-	
 	tasks = myTasks;
 	TimerSet(100);
 	TimerOn();
-
     while (1) 
     {
     }
